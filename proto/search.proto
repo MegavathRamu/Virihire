@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package search;
+
+// Search Service — realtime NL -> candidate match.
+// Owns its own FAISS index built from ProfileService data (over gRPC).
+service SearchService {
+  rpc SearchCandidates(SearchReq) returns (CandidateMatches);
+  rpc Reindex(ReindexReq)         returns (ReindexRes);
+}
+
+message SearchReq {
+  string query = 1; // natural-language query
+  int32  topK  = 2; // 0 -> default (10)
+}
+
+message CandidateMatch {
+  string candidateId = 1;
+  float  score       = 2; // cosine similarity, higher = better
+  string summary     = 3; // the text that was embedded
+  repeated string skills = 4;
+}
+
+message CandidateMatches {
+  repeated CandidateMatch matches = 1;
+  int32 indexed = 2; // how many candidates are currently in the index
+}
+
+message ReindexReq {}
+
+message ReindexRes {
+  int32 indexed = 1;
+}

@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package auth;
+
+// Auth Service — owns authdb (users). Signup, login, JWT issue + verify.
+service AuthService {
+  rpc Signup(SignupReq) returns (AuthRes); // returns userId + JWT
+  rpc Login(LoginReq)   returns (AuthRes);
+  rpc Verify(TokenReq)  returns (Claims);  // gateway calls this to validate JWT
+  rpc GetUsers(UserIdsReq) returns (UserList); // resolve ids -> name/email (Campaign Service)
+}
+
+message UserIdsReq {
+  repeated string userIds = 1;
+}
+
+message UserSummary {
+  string userId = 1;
+  string name   = 2;
+  string email  = 3;
+  string role   = 4;
+}
+
+message UserList {
+  repeated UserSummary users = 1;
+}
+
+message SignupReq {
+  string name     = 1;
+  string email    = 2;
+  string password = 3;
+  string role     = 4; // "candidate" | "recruiter"
+}
+
+message LoginReq {
+  string email    = 1;
+  string password = 2;
+}
+
+message AuthRes {
+  string userId = 1;
+  string token  = 2; // JWT
+  string role   = 3;
+  string name   = 4;
+}
+
+message TokenReq {
+  string token = 1;
+}
+
+message Claims {
+  bool   valid  = 1;
+  string userId = 2;
+  string email  = 3;
+  string role   = 4;
+}

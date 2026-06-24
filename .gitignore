@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# builds / generated
+dist/
+.next/
+**/gen/
+
+# logs / scratch
+.devlogs/
+*.log
+*.b64
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# os
+.DS_Store

@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package job;
+
+// Job Service — owns jobdb (jobs). Post, list (keyword search), get.
+service JobService {
+  rpc CreateJob(JobReq)   returns (Job);
+  rpc ListJobs(SearchReq) returns (JobList); // keyword search for now
+  rpc GetJob(IdReq)       returns (Job);
+}
+
+message JobReq {
+  string     recruiterId = 1;
+  string     title       = 2;
+  string     company     = 3;
+  string     description = 4;
+  repeated string skills = 5;
+  string     location    = 6;
+}
+
+message Job {
+  string     id          = 1;
+  string     recruiterId = 2;
+  string     title        = 3;
+  string     company     = 4;
+  string     description  = 5;
+  repeated string skills  = 6;
+  string     location     = 7;
+  string     createdAt    = 8;
+}
+
+message SearchReq {
+  string keyword = 1; // empty = list all
+}
+
+message IdReq {
+  string jobId = 1;
+}
+
+message JobList {
+  repeated Job jobs = 1;
+}

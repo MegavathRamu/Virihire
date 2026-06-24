@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package profile;
+
+// Profile Service — owns profiledb (profiles, applications).
+// Never queries jobdb directly; calls JobService.GetJob over gRPC.
+service ProfileService {
+  rpc UpsertProfile(ProfileReq) returns (Profile);
+  rpc GetProfile(IdReq)         returns (Profile);
+  rpc ApplyToJob(ApplyReq)      returns (Application);
+  rpc GetApplicants(JobIdReq)   returns (ApplicantList);
+  rpc ListProfiles(ListProfilesReq) returns (ProfileList); // for Search Service indexing
+}
+
+message Education {
+  string school = 1;
+  string degree = 2;
+  string year   = 3;
+}
+
+message Experience {
+  string company = 1;
+  string title   = 2;
+  string years   = 3;
+}
+
+message ProfileReq {
+  string     userId        = 1;
+  string     phone         = 2;
+  repeated string skills   = 3;
+  repeated Education education   = 4;
+  repeated Experience experience = 5;
+  bool       hasExperience = 6; // Fresher toggle: false = fresher
+  string     resumeUrl     = 7;
+}
+
+message Profile {
+  string     id            = 1;
+  string     userId        = 2;
+  string     phone         = 3;
+  repeated string skills   = 4;
+  repeated Education education   = 5;
+  repeated Experience experience = 6;
+  bool       hasExperience = 7;
+  string     resumeUrl     = 8;
+}
+
+message IdReq {
+  string userId = 1;
+}
+
+message ApplyReq {
+  string candidateId = 1;
+  string jobId       = 2;
+}
+
+message Application {
+  string id          = 1;
+  string candidateId = 2;
+  string jobId       = 3;
+  string status      = 4; // "applied"
+  string appliedAt   = 5;
+}
+
+message JobIdReq {
+  string jobId = 1;
+}
+
+message ListProfilesReq {
+  int32 limit = 1; // 0 = no limit
+}
+
+message ProfileList {
+  repeated Profile profiles = 1;
+}
+
+message Applicant {
+  string  candidateId = 1;
+  Profile profile     = 2;
+  string  status      = 3;
+  string  appliedAt   = 4;
+}
+
+message ApplicantList {
+  repeated Applicant applicants = 1;
+}

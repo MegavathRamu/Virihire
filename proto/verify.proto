@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package verify;
+
+// Verify Engine — our own OCR + fraud-check provider (no third party).
+// Owns verifydb (extracted fields + images + per-candidate verification state).
+service VerifyEngine {
+  rpc SetIdentity(IdentityReq)       returns (VerifyState); // name + father's name
+  rpc VerifyDocument(DocumentReq)    returns (VerifyResult); // OCR + fraud check
+  rpc GetState(CandidateRef)         returns (VerifyState);
+}
+
+message IdentityReq {
+  string candidateId = 1;
+  string name        = 2;
+  string fatherName  = 3;
+}
+
+// docType: "aadhaar_front" | "aadhaar_back" | "pan" | "tenth" | "twelfth" | "employment"
+message DocumentReq {
+  string candidateId = 1;
+  string docType     = 2;
+  string imageBase64 = 3; // data URL or raw base64
+}
+
+message VerifyResult {
+  string docType       = 1;
+  string status        = 2; // verified | mismatch | flagged | error
+  string extractedName = 3;
+  string extractedNumber = 4; // aadhaar/PAN number when applicable
+  string anchorName    = 5;   // the Aadhaar name we matched against
+  float  nameScore     = 6;   // similarity to anchor (0..1)
+  int32  attemptsLeft  = 7;   // remaining attempts for this doc
+  string message       = 8;
+}
+
+// One verified item.
+message DocState {
+  string docType       = 1;
+  string status        = 2; // pending | verified | flagged
+  string extractedName = 3;
+  string extractedNumber = 4;
+  int32  attempts      = 5;
+}
+
+message VerifyState {
+  string candidateId = 1;
+  string name        = 2;
+  string fatherName  = 3;
+  string anchorName  = 4;  // name extracted from Aadhaar (source of truth)
+  bool   aadhaarVerified = 5;
+  repeated DocState docs = 6;
+  string nextStep    = 7;  // which docType is unlocked next
+}
+
+message CandidateRef {
+  string candidateId = 1;
+}
