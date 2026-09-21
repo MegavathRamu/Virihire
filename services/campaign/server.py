@@ -25,7 +25,7 @@ import campaign_pb2_grpc     # noqa: E402
 import auth_pb2              # noqa: E402
 import auth_pb2_grpc         # noqa: E402
 
-from emailer import send_email, personalize  # noqa: E402
+from emailer import send_email, compose_email  # noqa: E402
 
 PORT = os.environ.get("PORT", "50055")
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017/campaigndb")
@@ -82,8 +82,8 @@ def process_campaign(campaign_id: str):
         if r["status"] == "failed":  # unresolved email
             failed += 1
             continue
-        body = personalize(r.get("name", ""), "", doc["message"])
-        ok, err = send_email(r["email"], doc["subject"], body)
+        text, html = compose_email(r.get("name", ""), doc["message"], doc.get("company", ""), doc.get("role", ""))
+        ok, err = send_email(r["email"], doc["subject"], text, html, doc.get("company", ""), doc.get("replyTo", ""))
         recipients[i]["status"] = "sent" if ok else "failed"
         recipients[i]["error"] = "" if ok else err
         sent += 1 if ok else 0
@@ -153,6 +153,9 @@ class CampaignServicer(campaign_pb2_grpc.CampaignServiceServicer):
             "recruiterId": request.recruiterId,
             "subject": request.subject,
             "message": request.message,
+            "company": request.company,
+            "role": request.role,
+            "replyTo": request.replyTo,
             "status": "queued",
             "recipients": recipients,
             "sent": 0,

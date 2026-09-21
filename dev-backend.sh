@@ -30,8 +30,10 @@ start() { # name port extra-env...
 
 start auth    50051 MONGO_URL=mongodb://localhost:27017/authdb    JWT_SECRET=dev-secret
 start job      50053 MONGO_URL=mongodb://localhost:27017/jobdb
+start referral 50058 MONGO_URL=mongodb://localhost:27017/referraldb AUTH_SERVICE_URL=localhost:50051 EMAIL_PROVIDER="${EMAIL_PROVIDER:-sandbox}" EMAIL_FROM="${EMAIL_FROM:-onboarding@resend.dev}" RESEND_API_KEY="${RESEND_API_KEY:-}"
+start assessment 50059 MONGO_URL=mongodb://localhost:27017/assessmentdb EMAIL_PROVIDER="${EMAIL_PROVIDER:-sandbox}" EMAIL_FROM="${EMAIL_FROM:-onboarding@resend.dev}" RESEND_API_KEY="${RESEND_API_KEY:-}" APP_URL="${APP_URL:-http://localhost:3000}"
 start profile 50052 MONGO_URL=mongodb://localhost:27017/profiledb JOB_SERVICE_URL=localhost:50053
-start gateway 8080  AUTH_SERVICE_URL=localhost:50051 PROFILE_SERVICE_URL=localhost:50052 JOB_SERVICE_URL=localhost:50053 SEARCH_SERVICE_URL=localhost:50054 CAMPAIGN_SERVICE_URL=localhost:50055 NOTIFY_SERVICE_URL=localhost:50056 VERIFY_SERVICE_URL=localhost:50057
+start gateway 8080  AUTH_SERVICE_URL=localhost:50051 PROFILE_SERVICE_URL=localhost:50052 JOB_SERVICE_URL=localhost:50053 SEARCH_SERVICE_URL=localhost:50054 CAMPAIGN_SERVICE_URL=localhost:50055 NOTIFY_SERVICE_URL=localhost:50056 VERIFY_SERVICE_URL=localhost:50057 REFERRAL_SERVICE_URL=localhost:50058 ASSESSMENT_SERVICE_URL=localhost:50059
 
 # Python search service (uses its own venv). Optional — skipped if not set up.
 if [ -x "$ROOT/services/search/.venv/bin/python" ]; then
@@ -47,7 +49,9 @@ fi
 if [ -x "$ROOT/services/campaign/.venv/bin/python" ]; then
   echo "starting campaign on :50055  (logs: .devlogs/campaign.log)"
   ( cd "$ROOT/services/campaign" && env PORT=50055 AUTH_SERVICE_URL=localhost:50051 \
-      MONGO_URL=mongodb://localhost:27017/campaigndb EMAIL_PROVIDER=sandbox \
+      MONGO_URL=mongodb://localhost:27017/campaigndb \
+      EMAIL_PROVIDER="${EMAIL_PROVIDER:-sandbox}" EMAIL_FROM="${EMAIL_FROM:-onboarding@resend.dev}" \
+      RESEND_API_KEY="${RESEND_API_KEY:-}" SENDGRID_API_KEY="${SENDGRID_API_KEY:-}" ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
       .venv/bin/python server.py >"$LOGS/campaign.log" 2>&1 & )
 else
   echo "skipping campaign service (no venv). To enable:"
@@ -69,8 +73,10 @@ fi
 if [ -x "$ROOT/services/notify/.venv/bin/python" ]; then
   echo "starting notify on :50056  (logs: .devlogs/notify.log)"
   ( cd "$ROOT/services/notify" && env PORT=50056 \
-      PROFILE_SERVICE_URL=localhost:50052 AUTH_SERVICE_URL=localhost:50051 \
-      MONGO_URL=mongodb://localhost:27017/notifydb SMS_PROVIDER=sandbox \
+      PROFILE_SERVICE_URL=localhost:50052 AUTH_SERVICE_URL=localhost:50051 JOB_SERVICE_URL=localhost:50053 \
+      MONGO_URL=mongodb://localhost:27017/notifydb SMS_PROVIDER="${SMS_PROVIDER:-sandbox}" \
+      EMAIL_PROVIDER="${EMAIL_PROVIDER:-sandbox}" EMAIL_FROM="${EMAIL_FROM:-onboarding@resend.dev}" RESEND_API_KEY="${RESEND_API_KEY:-}" \
+      RECOMMEND_INTERVAL_SECONDS="${RECOMMEND_INTERVAL_SECONDS:-600}" \
       .venv/bin/python server.py >"$LOGS/notify.log" 2>&1 & )
 else
   echo "skipping notify service (no venv). To enable:"

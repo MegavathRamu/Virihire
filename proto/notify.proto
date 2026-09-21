@@ -16,6 +16,8 @@ message JobEvent {
   string company     = 3;
   repeated string skills = 4;
   string description  = 5;
+  string location       = 6;
+  string recruiterEmail = 7; // replies to the auto-email go here
 }
 
 message Ack {

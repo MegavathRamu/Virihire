@@ -28,8 +28,12 @@ from embeddings import using_voyage          # noqa: E402
 PORT = os.environ.get("PORT", "50054")
 PROFILE_SERVICE_URL = os.environ.get("PROFILE_SERVICE_URL", "localhost:50052")
 DEFAULT_TOP_K = 10
+# Auto-refresh the index if it's older than this, so search always reflects the
+# latest candidates without a manual re-index.
+REINDEX_TTL = float(os.environ.get("REINDEX_TTL", "8"))
 
 index = CandidateIndex()
+_last_index = 0.0
 _profile_channel = grpc.insecure_channel(PROFILE_SERVICE_URL)
 _profile_stub = profile_pb2_grpc.ProfileServiceStub(_profile_channel)
 
@@ -66,8 +70,19 @@ def do_reindex() -> int:
         for p in resp.profiles
     ]
     n = index.rebuild(candidates)
+    global _last_index
+    _last_index = time.time()
     print(f"[search] reindexed {n} candidates", flush=True)
     return n
+
+
+def maybe_reindex():
+    # Refresh from the Profile service if the index is stale.
+    if time.time() - _last_index > REINDEX_TTL:
+        try:
+            do_reindex()
+        except Exception as e:  # noqa: BLE001
+            print(f"[search] auto-reindex skipped: {e}", flush=True)
 
 
 def initial_reindex():
@@ -83,6 +98,7 @@ def initial_reindex():
 
 class SearchServicer(search_pb2_grpc.SearchServiceServicer):
     def SearchCandidates(self, request, context):
+        maybe_reindex()  # always reflect the latest candidates
         top_k = request.topK if request.topK and request.topK > 0 else DEFAULT_TOP_K
         query = (request.query or "").strip()
         results = index.search(query, top_k) if query else index.list_all(top_k)

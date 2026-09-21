@@ -121,6 +121,10 @@ def find_name(doc_type: str, lines):
         cands.sort(key=lambda c: (len(c[1].split()), len(c[1])), reverse=True)
         return cands[0][1]
 
+    if doc_type == "resume":
+        # Resumes put the candidate's name at the very top.
+        return cands[0][1]
+
     if doc_type in ("tenth", "twelfth", "employment"):
         return _marksheet_name(lines, cands)
 

@@ -10,7 +10,7 @@ COPY proto/ ./proto/
 
 RUN mkdir -p gen && python -m grpc_tools.protoc \
       -I proto --python_out=gen --grpc_python_out=gen \
-      proto/notify.proto proto/profile.proto proto/auth.proto
+      proto/notify.proto proto/profile.proto proto/auth.proto proto/job.proto
 
 EXPOSE 50056
 CMD ["python", "server.py"]

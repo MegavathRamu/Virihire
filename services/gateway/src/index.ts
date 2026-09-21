@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { authClient, profileClient, jobClient, searchClient, campaignClient, notifyClient, verifyClient, call } from "./clients.js";
+import { authClient, profileClient, jobClient, searchClient, campaignClient, notifyClient, verifyClient, referralClient, assessmentClient, call } from "./clients.js";
 import { requireAuth, requireRole, grpcErrorHandler, type AuthedRequest } from "./middleware.js";
 
 const PORT = process.env.PORT || "8080";
@@ -76,6 +76,9 @@ app.post(
       subject: req.body.subject,
       message: req.body.message,
       candidateIds: req.body.candidateIds || [],
+      company: req.body.company || "",
+      role: req.body.role || "",
+      replyTo: req.user!.email, // replies go to the recruiter's account email
     });
     res.status(201).json(result);
   })
@@ -152,6 +155,9 @@ app.post(
       candidateId: req.user!.userId,
       name: req.body.name || "",
       fatherName: req.body.fatherName || "",
+      village: req.body.village || "",
+      address: req.body.address || "",
+      pincode: req.body.pincode || "",
     });
     res.json(state);
   })
@@ -181,6 +187,28 @@ app.get(
   })
 );
 
+// Candidate downloads their own IDV report (with document images).
+app.get(
+  "/verify/report",
+  requireAuth,
+  requireRole("candidate"),
+  h(async (req, res) => {
+    const report = await call(verifyClient, "GetReport", { candidateId: req.user!.userId });
+    res.json(report);
+  })
+);
+
+// Recruiter downloads a matched candidate's IDV report.
+app.get(
+  "/candidates/:id/idv",
+  requireAuth,
+  requireRole("recruiter"),
+  h(async (req, res) => {
+    const report = await call(verifyClient, "GetReport", { candidateId: req.params.id });
+    res.json(report);
+  })
+);
+
 // ---------------- Jobs ----------------
 // Post a job (recruiter only). recruiterId comes from the verified token.
 app.post(
@@ -196,15 +224,9 @@ app.post(
       skills: req.body.skills || [],
       location: req.body.location || "",
     });
-    // Fire the "job.created" event to the Notification Service (fire-and-forget)
-    // so posting stays instant. This is the Kafka/Lambda trigger point.
-    call(notifyClient, "RecommendForJob", {
-      jobId: job.id,
-      title: job.title,
-      company: job.company,
-      skills: job.skills,
-      description: job.description,
-    }).catch((e) => console.warn("[gateway] notify trigger failed:", e?.message));
+    // Note: we do NOT trigger the recommendation engine here. It runs on its own
+    // schedule (every RECOMMEND_INTERVAL_SECONDS) inside the Notify service and
+    // picks up this job on its next pass.
     res.status(201).json(job);
   })
 );
@@ -261,6 +283,199 @@ app.get(
   h(async (req, res) => {
     const applicants = await call(profileClient, "GetApplicants", { jobId: req.params.id });
     res.json(applicants);
+  })
+);
+
+// ---------------- Referrals ----------------
+// Referrer (employee) — manage own profile + handle requests.
+app.put(
+  "/referrer/profile",
+  requireAuth,
+  requireRole("referrer"),
+  h(async (req, res) => {
+    const r = await call(referralClient, "UpsertReferrer", {
+      referrerId: req.user!.userId,
+      name: req.body.name || "",
+      company: req.body.company || "",
+      role: req.body.role || "",
+      years: req.body.years || "",
+      description: req.body.description || "",
+      photo: req.body.photo || "",
+    });
+    res.json(r);
+  })
+);
+app.get(
+  "/referrer/profile",
+  requireAuth,
+  requireRole("referrer"),
+  h(async (req, res) => {
+    try {
+      res.json(await call(referralClient, "GetReferrer", { id: req.user!.userId }));
+    } catch {
+      res.json({ referrerId: req.user!.userId, name: "", company: "", role: "", years: "", description: "" });
+    }
+  })
+);
+app.get(
+  "/referrer/requests",
+  requireAuth,
+  requireRole("referrer"),
+  h(async (req, res) => {
+    res.json(await call(referralClient, "ListRequestsForReferrer", { id: req.user!.userId }));
+  })
+);
+app.post(
+  "/referrer/requests/:id/respond",
+  requireAuth,
+  requireRole("referrer"),
+  h(async (req, res) => {
+    const r = await call(referralClient, "RespondRequest", {
+      requestId: req.params.id,
+      referrerId: req.user!.userId,
+      accept: !!req.body.accept,
+    });
+    res.json(r);
+  })
+);
+
+// Candidate — browse referrers by company (no contact shown) + request + track.
+app.get(
+  "/referrers",
+  requireAuth,
+  requireRole("candidate"),
+  h(async (req, res) => {
+    res.json(await call(referralClient, "ListReferrers", { company: (req.query.company as string) || "" }));
+  })
+);
+app.post(
+  "/referrals",
+  requireAuth,
+  requireRole("candidate"),
+  h(async (req, res) => {
+    const r = await call(referralClient, "CreateRequest", {
+      candidateId: req.user!.userId,
+      candidateName: req.body.candidateName || "",
+      referrerId: req.body.referrerId,
+      about: req.body.about || "",
+      whyFit: req.body.whyFit || "",
+      whyRefer: req.body.whyRefer || "",
+      targetRole: req.body.targetRole || "",
+    });
+    res.status(201).json(r);
+  })
+);
+app.get(
+  "/referrals/mine",
+  requireAuth,
+  requireRole("candidate"),
+  h(async (req, res) => {
+    res.json(await call(referralClient, "ListRequestsForCandidate", { id: req.user!.userId }));
+  })
+);
+
+// ---------------- Assessments (proctored coding tests) ----------------
+// Recruiter — create + review.
+app.post(
+  "/assessments",
+  requireAuth,
+  requireRole("recruiter"),
+  h(async (req, res) => {
+    const a = await call(assessmentClient, "CreateAssessment", {
+      recruiterId: req.user!.userId,
+      title: req.body.title,
+      question: req.body.question || "",
+      language: req.body.language || "javascript",
+      durationMins: Number(req.body.durationMins) || 30,
+      testCases: req.body.testCases || [],
+    });
+    res.status(201).json(a);
+  })
+);
+app.post(
+  "/assessments/:id/invite",
+  requireAuth,
+  requireRole("recruiter"),
+  h(async (req, res) => {
+    const inv = await call(assessmentClient, "InviteCandidate", {
+      assessmentId: req.params.id,
+      candidateEmail: req.body.candidateEmail || "",
+    });
+    res.status(201).json(inv);
+  })
+);
+app.get(
+  "/assessments/:id/invites",
+  requireAuth,
+  requireRole("recruiter"),
+  h(async (req, res) => { res.json(await call(assessmentClient, "ListInvitesForAssessment", { id: req.params.id })); })
+);
+app.get(
+  "/assessments/mine",
+  requireAuth,
+  requireRole("recruiter"),
+  h(async (req, res) => { res.json(await call(assessmentClient, "ListAssessments", { recruiterId: req.user!.userId })); })
+);
+app.get(
+  "/assessments/:id/submissions",
+  requireAuth,
+  requireRole("recruiter"),
+  h(async (req, res) => { res.json(await call(assessmentClient, "ListSubmissions", { id: req.params.id })); })
+);
+app.get(
+  "/submissions/:id",
+  requireAuth,
+  requireRole("recruiter"),
+  h(async (req, res) => { res.json(await call(assessmentClient, "GetSubmission", { id: req.params.id })); })
+);
+
+// Candidate — invited tests, open one, start, run, submit.
+app.get(
+  "/assessments/invited",
+  requireAuth,
+  requireRole("candidate"),
+  h(async (req, res) => { res.json(await call(assessmentClient, "ListInvites", { email: req.user!.email })); })
+);
+app.get(
+  "/assessments/:id",
+  requireAuth,
+  requireRole("candidate"),
+  h(async (req, res) => { res.json(await call(assessmentClient, "GetAssessment", { id: req.params.id })); })
+);
+app.post(
+  "/assessments/:id/run",
+  requireAuth,
+  requireRole("candidate"),
+  h(async (req, res) => {
+    const a: any = await call(assessmentClient, "GetAssessment", { id: req.params.id });
+    const result = await call(assessmentClient, "RunCode", { code: req.body.code || "", testCases: a.testCases || [] });
+    res.json(result);
+  })
+);
+app.post(
+  "/assessments/:id/start",
+  requireAuth,
+  requireRole("candidate"),
+  h(async (req, res) => {
+    const s = await call(assessmentClient, "StartSubmission", {
+      assessmentId: req.params.id,
+      candidateId: req.user!.userId,
+      candidateName: req.body.candidateName || "",
+    });
+    res.status(201).json(s);
+  })
+);
+app.post(
+  "/submissions/:id/submit",
+  requireAuth,
+  requireRole("candidate"),
+  h(async (req, res) => {
+    const s = await call(assessmentClient, "SubmitAttempt", {
+      submissionId: req.params.id,
+      code: req.body.code || "",
+      events: req.body.events || [],
+    });
+    res.json(s);
   })
 );
 

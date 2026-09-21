@@ -26,15 +26,21 @@ import profile_pb2         # noqa: E402
 import profile_pb2_grpc    # noqa: E402
 import auth_pb2            # noqa: E402
 import auth_pb2_grpc       # noqa: E402
+import job_pb2             # noqa: E402
+import job_pb2_grpc        # noqa: E402
 
 from sms import send_sms   # noqa: E402
+import mailer              # noqa: E402
 import recommender         # noqa: E402  (content-based engine — separate from semantic search)
 
 PORT = os.environ.get("PORT", "50056")
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017/notifydb")
 PROFILE_SERVICE_URL = os.environ.get("PROFILE_SERVICE_URL", "localhost:50052")
 AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "localhost:50051")
+JOB_SERVICE_URL = os.environ.get("JOB_SERVICE_URL", "localhost:50053")
 MIN_SCORE = float(os.environ.get("MIN_SCORE", "0.05"))   # only notify real matches
+# How often the recommendation engine runs on its own (cron-style). Default 10 min.
+RUN_INTERVAL = int(os.environ.get("RECOMMEND_INTERVAL_SECONDS", "600"))
 
 
 def connect_db():
@@ -60,6 +66,7 @@ notifications.create_index([("jobId", ASCENDING), ("candidateId", ASCENDING)], u
 
 _profile = profile_pb2_grpc.ProfileServiceStub(grpc.insecure_channel(PROFILE_SERVICE_URL))
 _auth = auth_pb2_grpc.AuthServiceStub(grpc.insecure_channel(AUTH_SERVICE_URL))
+_job = job_pb2_grpc.JobServiceStub(grpc.insecure_channel(JOB_SERVICE_URL))
 
 JOBS: "queue.Queue[dict]" = queue.Queue()
 
@@ -93,10 +100,10 @@ def rank_candidates(job: dict):
     return ranked, profiles_by_id
 
 
-def candidate_names(ids):
+def candidate_users(ids):
     try:
         resp = _auth.GetUsers(auth_pb2.UserIdsReq(userIds=ids))
-        return {u.userId: u.name for u in resp.users}
+        return {u.userId: (u.name, u.email) for u in resp.users}
     except grpc.RpcError:
         return {}
 
@@ -106,39 +113,45 @@ def process_job(job: dict):
     if not matches:
         print(f"[notify] job {job['jobId']}: no matching candidates", flush=True)
         return
-    names = candidate_names([cid for cid, _ in matches])
+    users = candidate_users([cid for cid, _ in matches])
+    company = job.get("company", "")
+    subject = f"You're a match: {job.get('title','a role')} at {company}"
     for cid, score in matches:
         # Dedup: skip if we already notified this candidate for this job.
         if notifications.find_one({"jobId": job["jobId"], "candidateId": cid}):
             continue
-        name = names.get(cid, "")
+        name, email = users.get(cid, ("", ""))
         p = profiles.get(cid)
         phone = (p.phone if p else "") or ""
+
+        # 1) Auto-EMAIL the matching candidate (job details + please-apply), from the company.
+        email_status, email_err = "skipped", "no email on file"
+        if email:
+            text, html = mailer.compose_job_alert(name, job)
+            ok, err = mailer.send_email(email, subject, text, html, company, job.get("recruiterEmail", ""))
+            email_status, email_err = ("sent" if ok else "failed"), ("" if ok else err)
+
+        # 2) Auto-SMS as well (if a phone is on file).
+        sms_status, sms_err = "skipped", "no phone on file"
+        if phone:
+            sms_text = f"Hi {name or 'there'}, a new role '{job.get('title','')}' at {company} matches your skills. Apply on Verihire."
+            ok, err = send_sms(phone, sms_text)
+            sms_status, sms_err = ("sent" if ok else "failed"), ("" if ok else err)
+
         rec = {
-            "jobId": job["jobId"],
-            "candidateId": cid,
-            "name": name,
-            "phone": phone,
+            "jobId": job["jobId"], "candidateId": cid, "name": name, "email": email, "phone": phone,
             "score": float(score),
-            "channel": "sms",
+            "channel": "email+sms",
+            "status": email_status,          # primary channel = email
+            "error": email_err if email_status != "sent" else "",
+            "smsStatus": sms_status, "smsError": sms_err,
             "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-        if not phone:
-            rec["status"] = "skipped"
-            rec["error"] = "no phone on file"
-        else:
-            text = (
-                f"Hi {name or 'there'}, a new role '{job['title']}' at {job['company']} "
-                f"matches your skills. Apply on Verihire."
-            )
-            ok, err = send_sms(phone, text)
-            rec["status"] = "sent" if ok else "failed"
-            rec["error"] = "" if ok else err
         try:
             notifications.insert_one(rec)
         except Exception:  # noqa: BLE001 (duplicate key from a race — ignore)
             pass
-    print(f"[notify] job {job['jobId']}: processed {len(matches)} matches", flush=True)
+    print(f"[notify] job {job['jobId']}: emailed/sms'd {len(matches)} matches", flush=True)
 
 
 def worker():
@@ -150,6 +163,43 @@ def worker():
             print(f"[notify] worker error: {e}", flush=True)
         finally:
             JOBS.task_done()
+
+
+def recruiter_email(recruiter_id: str) -> str:
+    try:
+        resp = _auth.GetUsers(auth_pb2.UserIdsReq(userIds=[recruiter_id]))
+        return resp.users[0].email if resp.users else ""
+    except grpc.RpcError:
+        return ""
+
+
+def sweep_all_jobs():
+    """One scheduled pass: match candidates to every job and email new matches.
+    Dedup (jobId+candidateId) means each pass only notifies people not yet notified —
+    so it also catches candidates who signed up after a job was posted."""
+    resp = _job.ListJobs(job_pb2.SearchReq(keyword=""))
+    jobs = list(resp.jobs)
+    print(f"[notify] scheduled run: scanning {len(jobs)} job(s)", flush=True)
+    for j in jobs:
+        process_job({
+            "jobId": j.id,
+            "title": j.title,
+            "company": j.company,
+            "skills": list(j.skills),
+            "description": j.description,
+            "location": j.location,
+            "recruiterEmail": recruiter_email(j.recruiterId),
+        })
+
+
+def scheduler():
+    """Runs the recommendation engine on its own every RUN_INTERVAL seconds — no trigger."""
+    while True:
+        try:
+            sweep_all_jobs()
+        except Exception as e:  # noqa: BLE001
+            print(f"[notify] scheduled run failed: {e}", flush=True)
+        time.sleep(RUN_INTERVAL)
 
 
 class NotifyServicer(notify_pb2_grpc.NotificationServiceServicer):
@@ -184,11 +234,13 @@ class NotifyServicer(notify_pb2_grpc.NotificationServiceServicer):
 
 def serve():
     threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=scheduler, daemon=True).start()  # cron-style auto-runner
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     notify_pb2_grpc.add_NotificationServiceServicer_to_server(NotifyServicer(), server)
     server.add_insecure_port(f"0.0.0.0:{PORT}")
     server.start()
-    print(f"[notify] gRPC server listening on :{PORT} (provider: {os.environ.get('SMS_PROVIDER', 'sandbox')})", flush=True)
+    print(f"[notify] gRPC server listening on :{PORT} — recommendation engine runs every {RUN_INTERVAL}s "
+          f"(email: {os.environ.get('EMAIL_PROVIDER','sandbox')}, sms: {os.environ.get('SMS_PROVIDER','sandbox')})", flush=True)
     server.wait_for_termination()
 
 

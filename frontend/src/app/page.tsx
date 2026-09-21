@@ -18,7 +18,11 @@ export default function HomePage() {
 
   // Already logged in -> go to the right dashboard.
   useEffect(() => {
-    if (ready && session) router.replace(session.role === "recruiter" ? "/recruiter" : "/candidate");
+    if (ready && session) {
+      router.replace(
+        session.role === "recruiter" ? "/recruiter" : session.role === "referrer" ? "/referrer" : "/candidate"
+      );
+    }
   }, [ready, session, router]);
 
   async function submit(e: React.FormEvent) {
@@ -33,6 +37,8 @@ export default function HomePage() {
       setSession(res);
       if (res.role === "recruiter") {
         router.replace("/recruiter");
+      } else if (res.role === "referrer") {
+        router.replace("/referrer");
       } else if (mode === "signup") {
         // New candidate: create profile first, then jobs.
         router.replace("/candidate?tab=profile");
@@ -76,6 +82,7 @@ export default function HomePage() {
                 <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
                   <option value="candidate">Candidate (looking for jobs)</option>
                   <option value="recruiter">Recruiter (posting jobs)</option>
+                  <option value="referrer">Referrer (employee who gives referrals)</option>
                 </select>
               </>
             )}

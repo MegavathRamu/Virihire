@@ -8,12 +8,32 @@ service VerifyEngine {
   rpc SetIdentity(IdentityReq)       returns (VerifyState); // name + father's name
   rpc VerifyDocument(DocumentReq)    returns (VerifyResult); // OCR + fraud check
   rpc GetState(CandidateRef)         returns (VerifyState);
+  rpc GetReport(CandidateRef)        returns (VerifyReport);  // IDV report (docs + images)
+}
+
+message DocImage {
+  string docType     = 1;
+  string imageBase64 = 2;
+}
+
+message VerifyReport {
+  string candidateId   = 1;
+  string name          = 2;
+  string fatherName    = 3;
+  string anchorName    = 4;
+  string overallStatus = 5; // verified | flagged | incomplete
+  repeated DocState docs   = 6;
+  repeated DocImage images = 7;
+  string generatedAt   = 8;
 }
 
 message IdentityReq {
   string candidateId = 1;
   string name        = 2;
   string fatherName  = 3;
+  string village     = 4;
+  string address     = 5;
+  string pincode     = 6;
 }
 
 // docType: "aadhaar_front" | "aadhaar_back" | "pan" | "tenth" | "twelfth" | "employment"
@@ -51,6 +71,9 @@ message VerifyState {
   bool   aadhaarVerified = 5;
   repeated DocState docs = 6;
   string nextStep    = 7;  // which docType is unlocked next
+  string village     = 8;
+  string address     = 9;
+  string pincode     = 10;
 }
 
 message CandidateRef {

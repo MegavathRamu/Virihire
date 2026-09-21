@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { api, ApiError, type Applicant, type Campaign, type CandidateMatch, type Job, type Notification } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import Header from "@/components/Header";
+import { downloadIdv } from "@/lib/idv";
 
 export default function RecruiterPage() {
   const router = useRouter();
@@ -11,7 +12,8 @@ export default function RecruiterPage() {
 
   useEffect(() => {
     if (ready && !session) router.replace("/");
-    if (ready && session && session.role !== "recruiter") router.replace("/candidate");
+    if (ready && session && session.role !== "recruiter")
+      router.replace(session.role === "referrer" ? "/referrer" : "/candidate");
   }, [ready, session, router]);
 
   if (!ready || !session) return null;
@@ -23,6 +25,7 @@ export default function RecruiterPage() {
       <Header session={session} onLogout={() => { setSession(null); router.replace("/"); }} />
       <div className="container">
         <PostJob token={token} />
+        <Assessments token={token} />
         <MyJobs token={token} myId={myId} />
       </div>
     </>
@@ -100,9 +103,9 @@ function PostJob({ token }: { token: string }) {
 function MatchCandidates({ token, job }: { token: string; job: Job }) {
   const [matches, setMatches] = useState<CandidateMatch[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [subject, setSubject] = useState(`Opportunity: ${job.title} at ${job.company}`);
+  const [subject, setSubject] = useState(`You're shortlisted — ${job.title} at ${job.company}`);
   const [message, setMessage] = useState(
-    `We're hiring for ${job.title} at ${job.company} and your profile looks like a strong match. Would you be open to a quick chat?`
+    `Thank you for your interest in the ${job.title} position at ${job.company}. After reviewing your profile, we are pleased to shortlist you for this role and would like to invite you to the next round of our selection process.`
   );
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [msg, setMsg] = useState("");
@@ -146,7 +149,7 @@ function MatchCandidates({ token, job }: { token: string; job: Job }) {
     setMsg("");
     setCampaign(null);
     try {
-      let c = await api.createCampaign({ subject, message, candidateIds: Array.from(selected) }, token);
+      let c = await api.createCampaign({ subject, message, candidateIds: Array.from(selected), company: job.company, role: job.title }, token);
       setCampaign(c);
       for (let i = 0; i < 10 && c.status !== "done"; i++) {
         await new Promise((r) => setTimeout(r, 800));
@@ -190,9 +193,24 @@ function MatchCandidates({ token, job }: { token: string; job: Job }) {
             onChange={() => toggle(m.candidateId)}
           />
           <div style={{ flex: 1 }}>
-            <div className="row" style={{ justifyContent: "space-between" }}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
               <b>{m.name || `Candidate ${m.candidateId.slice(-6)}`}</b>
-              <span className="tag">match {(m.score * 100).toFixed(0)}%</span>
+              <span className="row" style={{ alignItems: "center", gap: 10 }}>
+                <span className="tag">match {(m.score * 100).toFixed(0)}%</span>
+                <button
+                  type="button"
+                  className="link"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    try {
+                      downloadIdv(await api.candidateIdvReport(m.candidateId, token));
+                    } catch {/* ignore */}
+                  }}
+                >
+                  ⬇ IDV report
+                </button>
+              </span>
             </div>
             <div>
               {m.skills.map((s) => (
@@ -386,6 +404,128 @@ function MyJobs({ token, myId }: { token: string; myId: string }) {
                   ) : (
                     <div className="muted">No profile filled in.</div>
                   )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function Assessments({ token }: { token: string }) {
+  const [title, setTitle] = useState("");
+  const [question, setQuestion] = useState("");
+  const [language, setLanguage] = useState("javascript");
+  const [durationMins, setDurationMins] = useState("30");
+  const [cases, setCases] = useState<{ input: string; expected: string }[]>([{ input: "", expected: "" }]);
+  const [list, setList] = useState<import("@/lib/api").Assessment[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [subs, setSubs] = useState<import("@/lib/api").Submission[]>([]);
+  const [invEmail, setInvEmail] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setList((await api.myAssessments(token)).assessments); } catch {/* */}
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setMsg("");
+    try {
+      const testCases = cases.filter((c) => c.input.trim() || c.expected.trim());
+      await api.createAssessment({ title, question, language, durationMins: Number(durationMins) || 30, testCases }, token);
+      setMsg("✓ Assessment created. Invite a candidate below to send it by email.");
+      setTitle(""); setQuestion(""); setCases([{ input: "", expected: "" }]);
+      await load();
+    } catch (err) { setMsg(err instanceof ApiError ? err.message : "Create failed"); }
+    finally { setBusy(false); }
+  }
+
+  async function viewSubs(id: string) {
+    if (openId === id) { setOpenId(null); return; }
+    try { setSubs((await api.assessmentSubmissions(id, token)).submissions); setOpenId(id); }
+    catch (err) { setMsg(err instanceof ApiError ? err.message : "Failed to load submissions"); }
+  }
+
+  async function invite(id: string) {
+    const email = (invEmail[id] || "").trim();
+    if (!email) return;
+    try {
+      await api.inviteCandidate(id, email, token);
+      setMsg(`✓ Invite emailed to ${email}`);
+      setInvEmail((p) => ({ ...p, [id]: "" }));
+    } catch (err) { setMsg(err instanceof ApiError ? err.message : "Invite failed"); }
+  }
+
+  const bandColor = (c: string) => (c === "High" ? "var(--ok)" : c === "Medium" ? "#b45309" : "var(--err)");
+
+  return (
+    <>
+      <form className="card" onSubmit={create}>
+        <h2 style={{ marginTop: 0 }}>Proctored assessments</h2>
+        <div className="row">
+          <div className="col"><label>Title</label><input value={title} onChange={(e) => setTitle(e.target.value)} required /></div>
+          <div className="col"><label>Language</label><input value={language} onChange={(e) => setLanguage(e.target.value)} /></div>
+          <div className="col"><label>Duration (min)</label><input value={durationMins} onChange={(e) => setDurationMins(e.target.value)} /></div>
+        </div>
+        <label>Question / problem statement</label>
+        <textarea value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Candidate implements: function solve(input) { ... }" />
+
+        <div className="section-title">Test cases <span className="muted">(input is JSON passed to solve(input); output string-compared)</span></div>
+        {cases.map((c, i) => (
+          <div className="row" key={i} style={{ marginBottom: 6 }}>
+            <input className="col" placeholder="input e.g. [2,7,11]" value={c.input}
+              onChange={(e) => setCases((cs) => cs.map((x, j) => (j === i ? { ...x, input: e.target.value } : x)))} />
+            <input className="col" placeholder="expected e.g. 9" value={c.expected}
+              onChange={(e) => setCases((cs) => cs.map((x, j) => (j === i ? { ...x, expected: e.target.value } : x)))} />
+            <button type="button" className="link danger" onClick={() => setCases((cs) => cs.filter((_, j) => j !== i))}>remove</button>
+          </div>
+        ))}
+        <button type="button" className="link" onClick={() => setCases((cs) => [...cs, { input: "", expected: "" }])}>+ add test case</button>
+
+        {msg && <div className={msg.startsWith("✓") ? "ok" : "error"}>{msg}</div>}
+        <div style={{ marginTop: 12 }}><button type="submit" disabled={busy}>{busy ? "Creating…" : "Create assessment"}</button></div>
+      </form>
+
+      {list.map((a) => (
+        <div className="card" key={a.id}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div><p className="job-title">{a.title}</p><p className="muted">{a.language} · {a.durationMins} min · {a.testCases?.length || 0} test case(s)</p></div>
+            <button className="ghost" onClick={() => viewSubs(a.id)}>{openId === a.id ? "Hide submissions" : "View submissions"}</button>
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <input className="col" placeholder="candidate email to invite" value={invEmail[a.id] || ""}
+              onChange={(e) => setInvEmail((p) => ({ ...p, [a.id]: e.target.value }))} />
+            <button type="button" onClick={() => invite(a.id)}>Send invite ✉</button>
+          </div>
+          {openId === a.id && (
+            <>
+              <hr />
+              {subs.length === 0 && <p className="muted">No submissions yet.</p>}
+              {subs.map((s) => (
+                <div key={s.id} style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 10 }}>
+                  <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                    <b>{s.candidateName || s.candidateId.slice(-6)}</b>
+                    <span className="row" style={{ gap: 8, alignItems: "center" }}>
+                      <span className="tag">{s.testsPassed}/{s.testsTotal} tests</span>
+                      {s.similarPercent >= 70 && <span className="badge" style={{ background: "#fde8e6", color: "var(--err)" }}>⚠ {s.similarPercent}% similar</span>}
+                      <span className="badge" style={{ background: "#f5f3ff", color: bandColor(s.confidence) }}>Integrity {s.confidence} · {s.integrityScore}/100</span>
+                    </span>
+                  </div>
+                  {s.integritySummary && <p className="muted" style={{ margin: "6px 0", fontSize: 13 }}>{s.integritySummary}</p>}
+                  {s.events.length > 0 && (
+                    <div style={{ margin: "4px 0" }}>
+                      {s.events.map((e, i) => (<span className="tag" key={i} title={e.at}>{e.type.replace(/_/g, " ")}</span>))}
+                    </div>
+                  )}
+                  <details>
+                    <summary className="muted" style={{ cursor: "pointer", fontSize: 12 }}>View submitted code</summary>
+                    <pre style={{ whiteSpace: "pre-wrap", background: "#faf9ff", border: "1px solid var(--border)", borderRadius: 8, padding: 10, fontSize: 12 }}>{s.code || "(empty)"}</pre>
+                  </details>
                 </div>
               ))}
             </>

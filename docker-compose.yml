@@ -32,6 +32,16 @@ services:
     volumes: [verifydb-data:/data/db]
     ports: ["27022:27017"]
 
+  referraldb:
+    image: mongo:7
+    volumes: [referraldb-data:/data/db]
+    ports: ["27023:27017"]
+
+  assessmentdb:
+    image: mongo:7
+    volumes: [assessmentdb-data:/data/db]
+    ports: ["27024:27017"]
+
   # ---------- Services ----------
   auth:
     build: { context: ., dockerfile: services/auth/Dockerfile }
@@ -79,7 +89,10 @@ services:
       MONGO_URL: "mongodb://campaigndb:27017/campaigndb"
       AUTH_SERVICE_URL: "auth:50051"
       EMAIL_PROVIDER: "${EMAIL_PROVIDER:-sandbox}"
-      # Optional: SENDGRID_API_KEY, EMAIL_FROM, ANTHROPIC_API_KEY for real send + LLM.
+      EMAIL_FROM: "${EMAIL_FROM:-onboarding@resend.dev}"
+      # Real send: set EMAIL_PROVIDER=resend + RESEND_API_KEY (or sendgrid). Keys come
+      # from the environment / .env — never hard-code them here.
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
       SENDGRID_API_KEY: "${SENDGRID_API_KEY:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     depends_on: [campaigndb, auth]
@@ -92,12 +105,18 @@ services:
       MONGO_URL: "mongodb://notifydb:27017/notifydb"
       PROFILE_SERVICE_URL: "profile:50052"
       AUTH_SERVICE_URL: "auth:50051"
+      JOB_SERVICE_URL: "job:50053"
+      RECOMMEND_INTERVAL_SECONDS: "${RECOMMEND_INTERVAL_SECONDS:-600}"
       SMS_PROVIDER: "${SMS_PROVIDER:-sandbox}"
+      # Auto job-alert emails (from the hiring company) use the same Resend setup.
+      EMAIL_PROVIDER: "${EMAIL_PROVIDER:-sandbox}"
+      EMAIL_FROM: "${EMAIL_FROM:-onboarding@resend.dev}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
       # Optional real SMS: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
       TWILIO_ACCOUNT_SID: "${TWILIO_ACCOUNT_SID:-}"
       TWILIO_AUTH_TOKEN: "${TWILIO_AUTH_TOKEN:-}"
       TWILIO_FROM: "${TWILIO_FROM:-}"
-    depends_on: [notifydb, profile, auth]
+    depends_on: [notifydb, profile, auth, job]
     ports: ["50056:50056"]
 
   verify:
@@ -107,6 +126,32 @@ services:
       MONGO_URL: "mongodb://verifydb:27017/verifydb"
     depends_on: [verifydb]
     ports: ["50057:50057"]
+
+  referral:
+    build: { context: ., dockerfile: services/referral/Dockerfile }
+    environment:
+      PORT: "50058"
+      MONGO_URL: "mongodb://referraldb:27017/referraldb"
+      AUTH_SERVICE_URL: "auth:50051"
+      EMAIL_PROVIDER: "${EMAIL_PROVIDER:-sandbox}"
+      EMAIL_FROM: "${EMAIL_FROM:-onboarding@resend.dev}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      PROTO_DIR: "/app/proto"
+    depends_on: [referraldb, auth]
+    ports: ["50058:50058"]
+
+  assessment:
+    build: { context: ., dockerfile: services/assessment/Dockerfile }
+    environment:
+      PORT: "50059"
+      MONGO_URL: "mongodb://assessmentdb:27017/assessmentdb"
+      EMAIL_PROVIDER: "${EMAIL_PROVIDER:-sandbox}"
+      EMAIL_FROM: "${EMAIL_FROM:-onboarding@resend.dev}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      APP_URL: "${APP_URL:-http://localhost:3000}"
+      PROTO_DIR: "/app/proto"
+    depends_on: [assessmentdb]
+    ports: ["50059:50059"]
 
   gateway:
     build: { context: ., dockerfile: services/gateway/Dockerfile }
@@ -119,8 +164,10 @@ services:
       CAMPAIGN_SERVICE_URL: "campaign:50055"
       NOTIFY_SERVICE_URL: "notify:50056"
       VERIFY_SERVICE_URL: "verify:50057"
+      REFERRAL_SERVICE_URL: "referral:50058"
+      ASSESSMENT_SERVICE_URL: "assessment:50059"
       PROTO_DIR: "/app/proto"
-    depends_on: [auth, profile, job, search, campaign, notify, verify]
+    depends_on: [auth, profile, job, search, campaign, notify, verify, referral, assessment]
     ports: ["8080:8080"]
 
   frontend:
@@ -139,3 +186,5 @@ volumes:
   campaigndb-data:
   notifydb-data:
   verifydb-data:
+  referraldb-data:
+  assessmentdb-data:

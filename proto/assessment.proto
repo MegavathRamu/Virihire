@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package assessment;
+
+// Assessment Service — proctored coding tests. Owns assessmentdb.
+// Integrity is a CONFIDENCE band + evidence, never a "cheating" verdict.
+service AssessmentService {
+  rpc CreateAssessment(AssessmentReq) returns (Assessment);
+  rpc GetAssessment(IdReq)            returns (Assessment);
+  rpc ListAssessments(RecruiterReq)   returns (AssessmentList); // recruiter's own
+  rpc ListOpen(Empty)                 returns (AssessmentList);  // candidate: available tests
+  rpc StartSubmission(StartReq)       returns (Submission);
+  rpc RunCode(RunReq)                 returns (RunResult);       // run against test cases (preview)
+  rpc SubmitAttempt(SubmitReq)        returns (Submission);      // runs tests + computes integrity
+  rpc ListSubmissions(IdReq)          returns (SubmissionList);  // by assessmentId (+ similarity)
+  rpc GetSubmission(IdReq)            returns (Submission);
+  rpc InviteCandidate(InviteReq)      returns (Invitation);      // recruiter invites a candidate by email
+  rpc ListInvites(EmailReq)           returns (InvitationList);  // candidate's invited tests
+  rpc ListInvitesForAssessment(IdReq) returns (InvitationList);  // recruiter view
+}
+
+message InviteReq {
+  string assessmentId  = 1;
+  string candidateEmail = 2;
+  string recruiterName = 3;
+}
+message Invitation {
+  string id             = 1;
+  string assessmentId   = 2;
+  string assessmentTitle = 3;
+  string candidateEmail = 4;
+  string status         = 5; // invited | started | submitted
+  string invitedAt      = 6;
+  int32  durationMins   = 7;
+  string language       = 8;
+}
+message EmailReq { string email = 1; }
+message InvitationList { repeated Invitation invitations = 1; }
+
+message TestCase {
+  string input    = 1; // JSON value passed to solve(input)
+  string expected = 2; // expected output (string-compared)
+}
+message CaseResult {
+  string input    = 1;
+  string expected = 2;
+  string got      = 3;
+  bool   passed   = 4;
+  string error    = 5;
+}
+message RunReq {
+  string code = 1;
+  repeated TestCase testCases = 2;
+}
+message RunResult {
+  repeated CaseResult results = 1;
+  int32 passed = 2;
+  int32 total  = 3;
+}
+
+message AssessmentReq {
+  string recruiterId  = 1;
+  string title        = 2;
+  string question     = 3;
+  string language     = 4;
+  int32  durationMins = 5;
+  repeated TestCase testCases = 6;
+}
+message Assessment {
+  string id           = 1;
+  string recruiterId  = 2;
+  string title        = 3;
+  string question     = 4;
+  string language     = 5;
+  int32  durationMins = 6;
+  string createdAt    = 7;
+  repeated TestCase testCases = 8;
+}
+
+message IdReq { string id = 1; }
+message RecruiterReq { string recruiterId = 1; }
+message Empty {}
+message AssessmentList { repeated Assessment assessments = 1; }
+
+message StartReq {
+  string assessmentId  = 1;
+  string candidateId   = 2;
+  string candidateName = 3;
+}
+
+// A proctoring event captured in the browser during the test.
+message Event {
+  string type     = 1; // fullscreen_exit | tab_switch | blur | copy | paste | big_paste | display_change | fast_answer | camera_off
+  string severity = 2; // weak | medium | strong
+  string at       = 3; // ISO timestamp
+  string detail   = 4;
+}
+
+message SubmitReq {
+  string submissionId  = 1;
+  string code          = 2;
+  repeated Event events = 3;
+}
+
+message Submission {
+  string id             = 1;
+  string assessmentId   = 2;
+  string candidateId    = 3;
+  string candidateName  = 4;
+  string code           = 5;
+  string status         = 6; // in_progress | submitted
+  int32  integrityScore = 7; // 0..100
+  string confidence     = 8; // High | Medium | Low (integrity confidence)
+  repeated Event events = 9;
+  string startedAt      = 10;
+  string submittedAt    = 11;
+  int32  testsPassed    = 12;
+  int32  testsTotal     = 13;
+  string integritySummary = 14; // plain-English explanation of the evidence
+  int32  similarPercent = 15;   // max code-similarity with another submission
+}
+message SubmissionList { repeated Submission submissions = 1; }

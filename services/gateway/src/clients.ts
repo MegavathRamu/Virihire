@@ -13,6 +13,8 @@ const SEARCH_URL = process.env.SEARCH_SERVICE_URL || "localhost:50054";
 const CAMPAIGN_URL = process.env.CAMPAIGN_SERVICE_URL || "localhost:50055";
 const NOTIFY_URL = process.env.NOTIFY_SERVICE_URL || "localhost:50056";
 const VERIFY_URL = process.env.VERIFY_SERVICE_URL || "localhost:50057";
+const REFERRAL_URL = process.env.REFERRAL_SERVICE_URL || "localhost:50058";
+const ASSESSMENT_URL = process.env.ASSESSMENT_SERVICE_URL || "localhost:50059";
 
 function load(file: string) {
   const def = protoLoader.loadSync(path.join(PROTO_DIR, file), {
@@ -32,6 +34,8 @@ const searchProto = load("search.proto");
 const campaignProto = load("campaign.proto");
 const notifyProto = load("notify.proto");
 const verifyProto = load("verify.proto");
+const referralProto = load("referral.proto");
+const assessmentProto = load("assessment.proto");
 
 const creds = grpc.credentials.createInsecure();
 
@@ -49,6 +53,8 @@ const bigMsgOpts = {
   "grpc.max_send_message_length": 25 * 1024 * 1024,
 };
 export const verifyClient = new verifyProto.verify.VerifyEngine(VERIFY_URL, creds, bigMsgOpts);
+export const referralClient = new referralProto.referral.ReferralService(REFERRAL_URL, creds);
+export const assessmentClient = new assessmentProto.assessment.AssessmentService(ASSESSMENT_URL, creds);
 
 // Promisified helper so route handlers can `await` a unary gRPC call.
 export function call<T = any>(client: any, method: string, req: any): Promise<T> {

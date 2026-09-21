@@ -14,6 +14,9 @@ message CampaignReq {
   string subject              = 2;
   string message              = 3;
   repeated string candidateIds = 4;
+  string company              = 5; // hiring company — used as the From name
+  string role                 = 6; // job title (for the shortlist line)
+  string replyTo              = 7; // recruiter's email — replies go here
 }
 
 message Recipient {

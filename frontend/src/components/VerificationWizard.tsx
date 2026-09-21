@@ -7,6 +7,7 @@ const SINGLE_STEPS: { key: string; label: string; hint: string }[] = [
   { key: "pan", label: "PAN card", hint: "Name must match your Aadhaar" },
   { key: "tenth", label: "10th marksheet", hint: "Name must match your Aadhaar" },
   { key: "twelfth", label: "12th marksheet", hint: "Name must match your Aadhaar" },
+  { key: "resume", label: "Resume (optional)", hint: "Optional · upload an image; name must match your Aadhaar" },
   { key: "employment", label: "Employment letter (optional)", hint: "Optional · name must match your Aadhaar" },
 ];
 

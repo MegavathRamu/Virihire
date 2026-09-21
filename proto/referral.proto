@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package referral;
+
+// Referral Service — employees (referrers) list themselves by company; verified
+// candidates request referrals via a form. Owns referraldb.
+service ReferralService {
+  rpc UpsertReferrer(ReferrerReq)        returns (Referrer);   // employee fills/updates their profile
+  rpc GetReferrer(IdReq)                 returns (Referrer);   // employee views own profile
+  rpc ListReferrers(CompanyReq)          returns (ReferrerList); // candidate browses by company (no contact)
+  rpc CreateRequest(RequestReq)          returns (ReferralRequest);
+  rpc ListRequestsForReferrer(IdReq)     returns (RequestList); // employee inbox
+  rpc ListRequestsForCandidate(IdReq)    returns (RequestList); // candidate's own requests + status
+  rpc RespondRequest(RespondReq)         returns (ReferralRequest);
+}
+
+message ReferrerReq {
+  string referrerId  = 1;
+  string name        = 2;
+  string company     = 3;
+  string role        = 4;
+  string years       = 5;
+  string description = 6;
+  string photo       = 7; // profile photo (data URL)
+}
+
+// Note: NO email/phone here — candidates never see referrer contact details.
+message Referrer {
+  string referrerId  = 1;
+  string name        = 2;
+  string company     = 3;
+  string role        = 4;
+  string years       = 5;
+  string description = 6;
+  string photo       = 7;
+}
+
+message IdReq { string id = 1; }
+message CompanyReq { string company = 1; }
+message ReferrerList { repeated Referrer referrers = 1; }
+
+message RequestReq {
+  string candidateId   = 1;
+  string candidateName = 2;
+  string referrerId    = 3;
+  string about         = 4;
+  string whyFit        = 5;
+  string whyRefer      = 6;
+  string targetRole    = 7;
+}
+
+message ReferralRequest {
+  string id              = 1;
+  string candidateId     = 2;
+  string candidateName   = 3;
+  string referrerId      = 4;
+  string referrerCompany = 5;
+  string about           = 6;
+  string whyFit          = 7;
+  string whyRefer        = 8;
+  string targetRole      = 9;
+  string status          = 10; // submitted | accepted | declined
+  string createdAt       = 11;
+}
+
+message RequestList { repeated ReferralRequest requests = 1; }
+
+message RespondReq {
+  string requestId  = 1;
+  string referrerId = 2;
+  bool   accept     = 3;
+}

@@ -8,5 +8,5 @@ python3 -m grpc_tools.protoc \
   -I "$ROOT/proto" \
   --python_out="$DIR/gen" \
   --grpc_python_out="$DIR/gen" \
-  "$ROOT/proto/notify.proto" "$ROOT/proto/profile.proto" "$ROOT/proto/auth.proto"
+  "$ROOT/proto/notify.proto" "$ROOT/proto/profile.proto" "$ROOT/proto/auth.proto" "$ROOT/proto/job.proto"
 echo "generated stubs in $DIR/gen"

@@ -27,8 +27,8 @@ NAME_THRESHOLD = float(os.environ.get("NAME_THRESHOLD", "0.7"))
 MAX_ATTEMPTS = int(os.environ.get("MAX_ATTEMPTS", "3"))
 
 # The fixed verification order.
-SEQUENCE = ["aadhaar_front", "aadhaar_back", "pan", "tenth", "twelfth", "employment"]
-NAME_CHECK = {"pan", "tenth", "twelfth", "employment"}  # matched vs Aadhaar anchor
+SEQUENCE = ["aadhaar_front", "aadhaar_back", "pan", "tenth", "twelfth", "resume", "employment"]
+NAME_CHECK = {"pan", "tenth", "twelfth", "resume", "employment"}  # matched vs Aadhaar anchor
 
 
 def connect_db():
@@ -99,6 +99,9 @@ def to_state_pb(state):
         aadhaarVerified=state.get("aadhaarVerified", False),
         docs=docs,
         nextStep=next_step(state),
+        village=state.get("village", ""),
+        address=state.get("address", ""),
+        pincode=state.get("pincode", ""),
     )
 
 
@@ -107,11 +110,41 @@ class VerifyServicer(verify_pb2_grpc.VerifyEngineServicer):
         state = get_state(request.candidateId)
         state["name"] = request.name.strip()
         state["fatherName"] = request.fatherName.strip()
+        state["village"] = request.village.strip()
+        state["address"] = request.address.strip()
+        state["pincode"] = request.pincode.strip()
         candidates.replace_one({"_id": request.candidateId}, state, upsert=True)
         return to_state_pb(state)
 
     def GetState(self, request, context):
         return to_state_pb(get_state(request.candidateId))
+
+    def GetReport(self, request, context):
+        state = get_state(request.candidateId)
+        # Overall verdict from the required docs.
+        required = ["aadhaar_front", "aadhaar_back", "pan", "tenth", "twelfth"]
+        statuses = {dt: (state["docs"].get(dt) or {}).get("status", "pending") for dt in required}
+        if any(s == "flagged" for s in statuses.values()):
+            overall = "flagged"
+        elif all(s == "verified" for s in statuses.values()):
+            overall = "verified"
+        else:
+            overall = "incomplete"
+        imgs = [
+            verify_pb2.DocImage(docType=d["docType"], imageBase64=d.get("imageBase64", ""))
+            for d in images.find({"candidateId": request.candidateId})
+        ]
+        st = to_state_pb(state)
+        return verify_pb2.VerifyReport(
+            candidateId=state["_id"],
+            name=state.get("name", ""),
+            fatherName=state.get("fatherName", ""),
+            anchorName=state.get("anchorName", ""),
+            overallStatus=overall,
+            docs=st.docs,
+            images=imgs,
+            generatedAt=time.strftime("%d %b %Y, %H:%M UTC", time.gmtime()),
+        )
 
     def VerifyDocument(self, request, context):
         dt = request.docType

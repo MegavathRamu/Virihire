@@ -24,8 +24,8 @@ export async function Signup(call: any, cb: any) {
     if (!name || !email || !password) {
       return cb({ code: grpc.status.INVALID_ARGUMENT, message: "name, email and password are required" });
     }
-    if (role !== "candidate" && role !== "recruiter") {
-      return cb({ code: grpc.status.INVALID_ARGUMENT, message: "role must be 'candidate' or 'recruiter'" });
+    if (!["candidate", "recruiter", "referrer"].includes(role)) {
+      return cb({ code: grpc.status.INVALID_ARGUMENT, message: "role must be 'candidate', 'recruiter' or 'referrer'" });
     }
 
     const existing = await User.findOne({ email: email.toLowerCase() });
